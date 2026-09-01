@@ -24,7 +24,7 @@ with st.sidebar:
     # Load default keys from Streamlit Secrets if configured, otherwise leave blank
     default_keys = st.secrets.get("GEMINI_KEYS", "") if hasattr(st, "secrets") else ""
     
-    raw_keys = st.text_area(
+    raw_keys = st.text_input(
         "Gemini API Keys (Comma-separated):",
         value=default_keys,
         type="password",
