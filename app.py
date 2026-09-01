@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 st.title("✦ Google AI Mode — Multi-Key Failover Portal")
-st.caption("Active Models: `gemini-3.5-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite` | Instant Key & Model Failover")
+st.caption("Active Models: `gemini-3.5-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite` | Multi-Turn Context Memory Enabled")
 
 # Target models to cycle through instantly upon any error/quota hit
 MODELS_TO_TRY = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]
@@ -21,7 +21,6 @@ MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB limit
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # Load default keys from Streamlit Secrets if configured, otherwise leave blank
     default_keys = st.secrets.get("GEMINI_KEYS", "") if hasattr(st, "secrets") else ""
     
     raw_keys = st.text_input(
@@ -34,7 +33,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "Upload File (Max 2GB)",
         type=None,
-        help="Supports Audio (MP3), Video (MP4), PDFs, Images, and Text files."
+        help="Supports Audio, Video, PDFs, Images, and Text files."
     )
     
     if st.button("Reset Chat Context", use_container_width=True):
@@ -45,36 +44,36 @@ with st.sidebar:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display Chat History
+# Display Chat History from Session Memory
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    display_role = "user" if message["role"] == "user" else "assistant"
+    with st.chat_message(display_role):
+        text_content = ""
+        for part in message.get("parts", []):
+            if isinstance(part, dict) and "text" in part:
+                text_content += part["text"]
+        st.markdown(text_content)
 
 # Main Input Bar
 user_prompt = st.chat_input("Ask a question or request assistance...")
 
-if user_prompt or uploaded_file:
-    # Parse API Keys
+if user_prompt:
     api_keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
     
     if not api_keys:
         st.error("⚠️ Please enter at least one Gemini API Key in the sidebar.")
     else:
-        prompt_text = user_prompt if user_prompt else "[Uploaded File]"
-        
-        # Render and save user message
-        st.session_state.messages.append({"role": "user", "content": prompt_text})
+        # 1. Format user message in Gemini's native multi-turn dictionary structure
+        user_turn = {
+            "role": "user",
+            "parts": [{"text": user_prompt}]
+        }
+        st.session_state.messages.append(user_turn)
+
         with st.chat_message("user"):
-            st.markdown(prompt_text)
+            st.markdown(user_prompt)
 
-        # Build prior conversation history for Gemini context
-        contents = []
-        for msg in st.session_state.messages[:-1]:
-            role_label = "user" if msg["role"] == "user" else "model"
-            contents.append(f"{role_label}: {msg['content']}")
-        contents.append(f"user: {prompt_text}")
-
-        # System instructions with temporal context
+        # 2. System instructions
         system_config = types.GenerateContentConfig(
             system_instruction="Today's date is Tuesday, September 1, 2026. You are a helpful AI assistant built by Google."
         )
@@ -102,12 +101,19 @@ if user_prompt or uploaded_file:
                 if success:
                     break
 
-                current_contents = list(contents)
+                # Clone past conversation history
+                current_contents = [dict(msg) for msg in st.session_state.messages]
+
+                # Attach file to the latest user turn if a file was uploaded
                 if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         sdk_file = client.files.upload(file=temp_file_path)
-                        current_contents.append(sdk_file)
-                    except Exception:
+                        current_contents[-1] = {
+                            "role": "user",
+                            "parts": [sdk_file, {"text": user_prompt}]
+                        }
+                    except Exception as e:
+                        print(f"File upload failover error: {e}")
                         continue
 
                 for model in MODELS_TO_TRY:
@@ -127,10 +133,11 @@ if user_prompt or uploaded_file:
                         response_placeholder.markdown(full_response)
                         success = True
                         break
-                    except Exception:
+                    except Exception as e:
+                        print(f"Debug - Error with model {model}: {e}")
                         continue
 
-            # Cleanup local temporary file
+            # Cleanup temporary file
             if temp_file_path and os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
 
@@ -138,5 +145,8 @@ if user_prompt or uploaded_file:
                 full_response = "Execution Error: All API keys and model options were exhausted."
                 response_placeholder.error(full_response)
 
-            # Record final assistant response in session memory
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            # 3. Store model response in session state memory for future turns
+            st.session_state.messages.append({
+                "role": "model",
+                "parts": [{"text": full_response}]
+            })
