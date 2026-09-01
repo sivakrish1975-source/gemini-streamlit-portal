@@ -1,5 +1,7 @@
 import os
+import json
 import streamlit as st
+import extra_streamlit_components as stx
 from google import genai
 from google.genai import types
 
@@ -10,14 +12,24 @@ st.set_page_config(
 )
 
 st.title("✦ Google AI Mode — Multi-Key Failover Portal")
-st.caption("Active Models: `gemini-3.5-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite` | Multi-Turn Memory Enabled")
+st.caption("Active Models: `gemini-3.5-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite` | Cookie Persistence Enabled")
 
 MODELS_TO_TRY = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]
 MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB limit
 
-# 1. PERSISTENT MEMORY (Replaces the global conversation_history list)
+# Initialize Cookie Manager for persistent browser storage
+cookie_manager = stx.CookieManager()
+
+# Load stored conversation from cookies if session state is empty
 if "conversation_history" not in st.session_state:
-    st.session_state.conversation_history = []
+    saved_cookie = cookie_manager.get(cookie="gemini_chat_history")
+    if saved_cookie:
+        try:
+            st.session_state.conversation_history = json.loads(saved_cookie)
+        except Exception:
+            st.session_state.conversation_history = []
+    else:
+        st.session_state.conversation_history = []
 
 # Sidebar Controls
 with st.sidebar:
@@ -38,11 +50,12 @@ with st.sidebar:
         help="Supports Audio, Video, PDFs, Images, and Text files."
     )
     
-    if st.button("Reset Context", use_container_width=True):
+    if st.button("Reset Context & Clear Cookies", use_container_width=True):
         st.session_state.conversation_history = []
+        cookie_manager.delete("gemini_chat_history")
         st.rerun()
 
-# Display Chat History from persistent session memory
+# Display Chat History
 for turn in st.session_state.conversation_history:
     role = "user" if turn["role"] == "user" else "assistant"
     with st.chat_message(role):
@@ -59,17 +72,14 @@ if user_message or uploaded_file:
     else:
         prompt_text = user_message if user_message else "[Uploaded File]"
         
-        # Render user message on UI
         with st.chat_message("user"):
             st.markdown(prompt_text)
 
-        # 2. EXACT MEMORY REBUILD LOGIC FROM YOUR WORKING COLAB CODE
         contents = []
         for turn in st.session_state.conversation_history:
             contents.append(f"{turn['role']}: {turn['text']}")
         contents.append(f"user: {prompt_text}")
 
-        # System instructions with temporal context
         system_config = types.GenerateContentConfig(
             system_instruction="Today's date is Tuesday, September 1, 2026. You are a helpful AI assistant built by Google."
         )
@@ -81,7 +91,6 @@ if user_message or uploaded_file:
             response_text = ""
             success = False
 
-            # Handle file upload if attached
             temp_file_path = None
             if uploaded_file is not None:
                 if uploaded_file.size > MAX_FILE_SIZE_BYTES:
@@ -92,7 +101,6 @@ if user_message or uploaded_file:
                 with open(temp_file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-            # 3. FAILOVER LOOP (EXACT LOGIC FROM YOUR WORKING COLAB CODE)
             for client in clients:
                 if success:
                     break
@@ -126,7 +134,6 @@ if user_message or uploaded_file:
                         print(f"Debug - Key/Model ({model_name}) error: {e}")
                         continue
 
-            # Cleanup temporary file
             if temp_file_path and os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
 
@@ -134,7 +141,14 @@ if user_message or uploaded_file:
                 response_text = "Execution Error: All API keys and model options were exhausted."
                 response_placeholder.error(response_text)
 
-            # 4. SAVE TO PERSISTENT MEMORY (EXACT LOGIC FROM YOUR COLAB CODE)
+            # Save to persistent memory & browser cookie
             if success and response_text:
                 st.session_state.conversation_history.append({'role': 'user', 'text': prompt_text})
                 st.session_state.conversation_history.append({'role': 'model', 'text': response_text})
+                
+                # Update browser cookie (expires in 7 days)
+                cookie_manager.set(
+                    "gemini_chat_history",
+                    json.dumps(st.session_state.conversation_history),
+                    key="save_cookie"
+                )
