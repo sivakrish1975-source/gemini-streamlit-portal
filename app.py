@@ -31,6 +31,7 @@ custom_css = """
 """
 st.markdown(custom_css, unsafe_allow_html=True)
 
+raw_keys = ""
 # 2. Setup Multi-Key API Clients (Securely loaded from Streamlit Secrets)
 if "GEMINI_API_KEYS" in st.secrets:
     raw_keys = st.secrets["GEMINI_API_KEYS"]
