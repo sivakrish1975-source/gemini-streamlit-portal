@@ -53,7 +53,7 @@ def get_gemini_clients(keys_tuple):
 
 # We pass a tuple to cache_resource because lists are unhashable
 clients = get_gemini_clients(tuple(api_keys))
-MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"]
+MODELS_TO_TRY = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]
 MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
 
 # 3. DuckDuckGo Free Live Search Grounding
