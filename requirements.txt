@@ -1,3 +1,4 @@
 streamlit
 google-genai
 extra-streamlit-components
+duckduckgo-search
